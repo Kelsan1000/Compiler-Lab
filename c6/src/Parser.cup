@@ -1,0 +1,235 @@
+import java.util.*;
+
+action code {: String currentProcName = ""; :}
+
+terminal PLUS, MINUS, TIMES, DIVIDE, MOD;
+terminal GTE, LTE, GT, LT, EQ, NE;
+terminal LPAREN, RPAREN;
+terminal UMINUS, ILLEGAL_CHAR;
+terminal String NUMBER;
+terminal String IDENTIFIER;
+terminal LNTERM;
+terminal LBRACE, RBRACE;
+terminal String INT, IF, ELSE, WHILE, RETURN;
+terminal ASSIGNMENT;
+terminal COMMA;
+
+
+non terminal Procedure program;
+non terminal SequenceProc programs;
+non terminal Stmt stmt;
+non terminal Stmt stmts;
+non terminal Stmt declarator;
+non terminal Stmt declarators;
+non terminal Expr expr;
+non terminal List<String> params, remParam;
+non terminal List<Expr> args, remArgs;
+non terminal String param;
+non terminal Expr argument;
+non terminal DeclareProc procDec;
+
+
+precedence left PLUS, MINUS;
+precedence left TIMES, DIVIDE, MOD;
+precedence nonassoc GTE, LTE, GT, LT, EQ, NE;
+precedence nonassoc ELSE;
+precedence left UMINUS;
+
+programs ::= programs:m procDec:d
+          {: m.addProc(d); 
+          RESULT = m; :}
+          |
+          programs:m program:p
+          {: m.addProc(p);
+          RESULT = m; :}
+          |
+          {: RESULT = new SequenceProc(); :}
+          ;
+
+procDec ::= INT IDENTIFIER:i LPAREN params:p RPAREN LNTERM
+          {: if (SequenceProc.decChecker(i,p.size())){
+                Compiler.error("The procedure: " + i + " has already been declared!\n");
+            }
+            else if (SequenceProc.defChecker(i,p.size())){
+                Compiler.error("The procedure: " + i + "has already been defined!\n" );
+            }
+
+            RESULT = new DeclareProc(i,p); :}
+          ;
+
+program ::= INT IDENTIFIER:i LPAREN params:p RPAREN LBRACE
+          {: SymbolTable.getTable().enterScope();
+            for (String param:p){
+              String val = NameAllocator.getTempAllocator().next();
+              SymbolTable.getTable().putVal(param,val);
+            }
+            if (SequenceProc.decChecker(i,p.size())){
+              Compiler.error("The procedure: " + i + " has already been declared!\n");
+            }
+            else if (SequenceProc.isDef(i)){
+              Compiler.error("The procedure: " + i + " has already been defined!\n");
+            }
+            currentProcName = i;
+          :}
+          stmts:s
+          {: RESULT = new Procedure(i,p, new SequenceStmt(s, 
+          new ReturnStmt(new ConstExpr(0)))); :}
+          RBRACE
+          {: SymbolTable.getTable().exitScope(); :}
+          ;
+
+params ::= param:p remParam:r
+          {: r.add(0,p);
+          RESULT = r; :}
+          |
+          {: RESULT = new ArrayList<String>(); :}
+          ;
+
+param ::= INT IDENTIFIER:i
+          {: RESULT = i; :}
+          ;
+
+remParam ::= COMMA param:p remParam:r
+          {: r.add(0,p);
+          RESULT = r; :}
+          |
+          {: RESULT = new ArrayList<String>(); :}
+          ;
+
+stmts ::= 
+          stmt:s stmts:m
+          {: RESULT = new SequenceStmt(s, m); :}
+          |
+          stmt:s
+          {: RESULT = s; :}
+          ;
+
+stmt ::= expr:e LNTERM
+         {: RESULT = new ExprStmt(e); :}
+         |
+         INT declarators:m LNTERM
+         {: RESULT = m; :}
+         |
+         IDENTIFIER:i ASSIGNMENT expr:e LNTERM
+         {: String pointer = SymbolTable.getTable().getVal(i);
+            RESULT = new AssignmentStmt(i,e,ileft, pointer); :}
+         |
+         IF LPAREN expr:e RPAREN stmt:s
+         {: RESULT = new IfStmt(e,s); :}
+         |
+         IF LPAREN expr:e RPAREN stmt:s ELSE stmt:m
+         {: RESULT = new IfElseStmt(e,s,m); :}
+         |
+         WHILE LPAREN expr:e RPAREN stmt:s
+         {: RESULT = new WhileStmt(e,s); :}
+         |
+         LBRACE
+         {: SymbolTable.getTable().enterScope(); :}
+         stmts:m
+         {: RESULT = m; :}
+         RBRACE
+         {: SymbolTable.getTable().exitScope(); :}
+         |
+         RETURN expr:e LNTERM
+         {: RESULT = new ReturnStmt(e); :}
+         ;
+
+declarators ::= declarator:d COMMA declarators:m
+                {: RESULT = new SequenceStmt(d,m); :}
+                |
+                declarator:d
+                {: RESULT = d; :}
+                ;
+
+declarator ::= IDENTIFIER:i
+               {: String pointer = SymbolTable.getTable().getLocal(i);
+                  String val = NameAllocator.getTempAllocator().next();
+                  if (pointer == null)
+                    SymbolTable.getTable().putVal(i,val);
+                  RESULT = new DeclarationStmt(i, ileft, pointer, val); :}
+               |
+               IDENTIFIER:i ASSIGNMENT expr:e
+               {: String pointer = SymbolTable.getTable().getLocal(i);
+                  String val = NameAllocator.getTempAllocator().next();
+                  if (pointer == null)
+                    SymbolTable.getTable().putVal(i,val);
+                  Stmt s = new DeclarationStmt(i, ileft, pointer, val);
+                  pointer = SymbolTable.getTable().getVal(i);
+                  Stmt m = new AssignmentStmt(i, e, ileft, pointer);
+                  RESULT = new SequenceStmt(s,m); :}
+               ;
+
+
+expr      ::= expr:l PLUS expr:r
+              {: RESULT = new SumExpr(l, r); :}
+	      |
+              expr:l MINUS expr:r
+              {: RESULT = new DifferenceExpr(l, r); :}
+	      |
+              expr:l TIMES expr:r
+              {: RESULT = new ProductExpr(l, r); :}
+	      |
+              expr:l DIVIDE expr:r
+              {: RESULT = new QuotientExpr(l, r); :}
+	      |
+              expr:l MOD expr:r
+              {: RESULT = new RemainderExpr(l, r); :}
+	      |
+              expr:l GT expr:r
+              {: RESULT = new GTExpr(l, r); :}
+        |
+              expr:l GTE expr:r
+              {: RESULT = new GTEExpr(l, r); :}
+        |
+              expr:l LT expr:r
+              {: RESULT = new LTExpr(l, r); :}
+        |
+              expr:l LTE expr:r
+              {: RESULT = new LTEExpr(l, r); :}
+        |
+              expr:l EQ expr:r
+              {: RESULT = new EQExpr(l, r); :}
+        |
+              expr:l NE expr:r
+              {: RESULT = new NEExpr(l, r); :}
+        |
+              MINUS expr:e
+              {: RESULT = new DifferenceExpr(new ConstExpr(0), e); :}
+ 	      %prec UMINUS
+	      |
+              NUMBER:n
+              {: RESULT = new ConstExpr(Integer.parseInt(n)); :}
+	      |
+              LPAREN expr:e RPAREN
+              {: RESULT = e; :}
+        |
+              IDENTIFIER:i LPAREN args:a RPAREN
+              {: if (!SequenceProc.contains(i,a.size()) && !currentProcName.equals(i)){
+                  Compiler.error("The procedure: " + i + " is either undefined or undeclared!\n");
+                  }
+
+                  RESULT = new CallExpr(i,a); :}
+        |     
+              IDENTIFIER:d
+              {: String pointer = SymbolTable.getTable().getVal(d);
+              RESULT = new LoadExpr(d,dleft,pointer); :}
+	      ;
+
+args ::= argument:a remArgs:r
+          {: r.add(0,a);
+          RESULT = r; :}
+          |
+          {: RESULT = new ArrayList<Expr>(); :}
+          ;
+          
+argument ::= expr:e
+        {: RESULT = e; :}
+        ;
+
+remArgs ::= COMMA argument:a remArgs:r
+        {: r.add(0,a);
+        RESULT = r; :}
+        |
+        {: RESULT = new ArrayList<Expr>(); :}
+        ;
+
